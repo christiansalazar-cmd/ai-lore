@@ -37,3 +37,26 @@ If you skipped “Allow automatic tasks,” open **Terminal → Run Task… → 
 - Manual alternative: [GitHub → Settings → Codespaces → Secrets](https://github.com/settings/codespaces).
 
 **Is the launcher “hidden” on a public repo?** No — committed files are always visible. See [`launcher-setup/VISIBILITY.md`](launcher-setup/VISIBILITY.md).
+
+#### Gum vs “Choose [1–4]” in the task terminal
+
+If you see the numeric fallback, **`gum` is not on `PATH`** for that shell (often after `gum` was installed under `~/.local/bin`). Tasks now prepend that to `PATH`. If it still happens, run **`bash launcher-setup/bootstrap.sh`** once in a normal terminal, or **rebuild the container** so `postCreateCommand` runs again.
+
+#### Local laptop (Terminal.app, Windows Terminal, WSL, etc.)
+
+VS Code / Codespaces **does not** offer a built-in “run this task in the macOS/Windows *external* terminal app” switch. The supported pattern is the same script in **your** terminal:
+
+1. Clone the repo and `cd` into it.
+2. Install **gum** for your OS (the devcontainer `bootstrap.sh` only installs the **Linux** binary; on macOS use e.g. `brew install gum`, on Windows use WSL or another install path you standardize).
+3. Run: `bash launcher-setup/setup-wizard.sh`
+
+That gives the same TUI in iTerm, Terminal.app, Windows Terminal, etc.—outside VS Code if you want.
+
+#### Wizard did not open automatically?
+
+1. **Trust the workspace** when VS Code asks — automatic tasks **never** run in an untrusted workspace.
+2. **Allow automatic tasks:** `Ctrl+Shift+P` (or `Cmd+Shift+P`) → **Tasks: Manage Automatic Tasks in Folder** → **Allow Automatic Tasks in Folder**.  
+   (VS Code often **does not** show a toast for this until you have run a task at least once — see [vscode#143298](https://github.com/microsoft/vscode/issues/143298).)
+3. This repo sets [`task.allowAutomaticTasks`](.vscode/settings.json) to **`on`** in **`.vscode/settings.json`** so the folder-open task can run without that extra prompt when the workspace is trusted.
+4. **Manual run:** **Terminal → Run Task… → “AI Lore: setup wizard”** (or the **(rerun)** variant).
+5. After each attach, `postAttachCommand` prints the same hint in the log output for **Codespaces**.

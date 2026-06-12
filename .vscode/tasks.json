@@ -6,7 +6,10 @@
       "type": "shell",
       "command": "bash launcher-setup/setup-wizard.sh",
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+        }
       },
       "problemMatcher": [],
       "presentation": {
@@ -24,7 +27,10 @@
       "type": "shell",
       "command": "bash launcher-setup/setup-wizard.sh",
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "${env:HOME}/.local/bin:${env:PATH}"
+        }
       },
       "problemMatcher": [],
       "presentation": {

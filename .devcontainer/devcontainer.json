@@ -5,6 +5,7 @@
     "ghcr.io/devcontainers/features/github-cli:1": {}
   },
   "postCreateCommand": "bash launcher-setup/bootstrap.sh",
+  "postAttachCommand": "bash launcher-setup/codespaces-on-attach.sh",
   "customizations": {
     "vscode": {
       "settings": {
