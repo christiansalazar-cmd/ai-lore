@@ -1,0 +1,15 @@
+{
+  "name": "ai-lore",
+  "image": "mcr.microsoft.com/devcontainers/universal:2",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "postCreateCommand": "bash launcher-setup/bootstrap.sh",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "task.allowAutomaticTasks": "on"
+      }
+    }
+  }
+}

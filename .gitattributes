@@ -1,0 +1,2 @@
+# Consistent LF for shell scripts (Codespaces / Linux)
+*.sh text eol=lf
