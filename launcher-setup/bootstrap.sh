@@ -3,6 +3,11 @@
 # Invoked from .devcontainer/devcontainer.json — keep that path stable for Codespaces.
 set -euo pipefail
 
+if command -v gum >/dev/null 2>&1; then
+  echo "bootstrap: gum already on PATH ($(command -v gum)), skipping install."
+  exit 0
+fi
+
 GUM_VERSION="${GUM_VERSION:-0.15.2}"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
@@ -39,3 +44,4 @@ else
 fi
 
 echo "bootstrap: gum installed."
+

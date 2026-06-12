@@ -9,4 +9,4 @@ This folder holds the **interactive setup wizard** and **bootstrap** script used
 
 **Not moved here (on purpose):** `.devcontainer/devcontainer.json` and `.vscode/tasks.json` stay at their **standard paths** so GitHub Codespaces and VS Code discover them automatically.
 
-See the root [README.md](../README.md) for the full launch sequence and [VISIBILITY.md](VISIBILITY.md) for what “hidden from the public” can and cannot mean on GitHub.
+See the root [README.md](../README.md#installing-gum-pick-your-environment) for the full launch sequence (including **Installing gum (pick your environment)** if you are not using the devcontainer) and [VISIBILITY.md](VISIBILITY.md) for what “hidden from the public” can and cannot mean on GitHub.
