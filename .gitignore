@@ -3,9 +3,6 @@
 .env.*
 !.env.example
 
-# Launcher scratch under the repo (secrets live in GitHub Codespaces user secrets)
-launcher-setup/local/
-
 # OS noise
 .DS_Store
 Thumbs.db

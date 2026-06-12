@@ -1,2 +1,8 @@
-# Consistent LF for shell scripts (Codespaces / Linux)
+# Consistent LF for shell scripts (Linux / macOS)
 *.sh text eol=lf
+*.py text eol=lf
+*.mdc text eol=lf
+# Extensionless CLI launcher must stay LF so it runs on Linux/macOS
+bin/ai-lore text eol=lf
+# PowerShell stays CRLF + UTF-8 BOM for Windows PowerShell 5.1
+*.ps1 text eol=crlf

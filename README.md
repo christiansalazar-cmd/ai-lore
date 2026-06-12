@@ -1,73 +1,145 @@
 # ai-lore
 
-The central source of truth for the company's AI logic, capabilities, and integrations. Instead of scattering prompts, system instructions, and orchestration code across isolated repositories, all shared assets live here to ensure consistency across our applications and engineering pipelines.
+The central source of truth for the company's AI logic, capabilities, and integrations. Instead of scattering prompts, system instructions, and orchestration code across separate repositories, all shared assets live here so they stay consistent across our apps and engineering pipelines.
 
-### 📁 Core Structure
+**In plain terms:** ai-lore is a shared library of AI add-ons (skills, MCP servers, and rules). You install a small `ai-lore` command once. After that, you can walk into any project you're working on in [Cursor](https://cursor.com), run `ai-lore setup`, and pick which add-ons to drop into that project. No copying files by hand.
 
-*   **`/models`** – Foundational provider configurations (Claude, OpenAI, Codex) including default system prompts, temperature baselines, and model version pinning.
-*   **`/plugins`** – Code, manifests, and integrations connecting our core models to internal dashboards and third-party enterprise tools.
-*   **`/mcps`** – Model Context Protocol setups that securely bridge LLMs to local developer environments and internal company databases.
-*   **`/skills`** – Our library of atomic, reusable prompt chains designed to execute specific, deterministic tasks.
-*   **`/agents`** – Full autonomous agent definitions, multi-agent orchestration frameworks, and state/memory management configurations.
-*   **`/hooks`** – Middleware and event-driven webhooks used to trigger automated AI workflows directly from internal system events.
-*   **`/guards`** – PII scrubbing logic, input/output moderation filters, and compliance guardrails.
-*   **`/evals`** – Test suites, prompt benchmarks, and regression tests used to validate updates before they hit production.
-*   **`/telemetry`** – OpenTelemetry hooks, standardized logging schemas, and trace formats to audit agent reasoning loops and prompt performance.
+---
 
-### GitHub Codespaces
+## Quick start
 
-This repo includes a [Dev Container](https://containers.dev/) at `.devcontainer/devcontainer.json` and launcher scripts under [`launcher-setup/`](launcher-setup/README.md).
+There are two steps, and you only do step 1 one time per computer.
 
-#### Launch process (what happens when you open a Codespace)
+1. **Install the `ai-lore` command** (one time).
+2. **Run `ai-lore setup` inside a project** (any time you want to add things).
 
-1. **GitHub builds the dev container** from the image in `devcontainer.json` (and runs the `features` you declared, e.g. GitHub CLI).
-2. **`postCreateCommand` runs once** after the container is created: `bash launcher-setup/bootstrap.sh` installs **gum** (arrow-key menus) — no interactive prompts there.
-3. **The editor attaches** to the Codespace. VS Code then evaluates **automatic tasks**.
-4. **First time in this workspace**, VS Code may ask you to **Trust** the folder and to **Allow automatic tasks** — choose **Allow** for the setup wizard task.
-5. The task **`AI Lore: setup wizard`** runs with **`runOn: folderOpen`**, which starts **`bash launcher-setup/setup-wizard.sh`** in a terminal. That is the interactive launcher (not the container build itself).
+```
+your-workspace/
+├── ai-lore/        <- this repo, cloned once (the library)
+├── project-a/      <- run "ai-lore setup" here, files land in project-a/.cursor/
+├── project-b/
+└── project-c/
+```
 
-If you skipped “Allow automatic tasks,” open **Terminal → Run Task… → “AI Lore: setup wizard (rerun)”** anytime.
+### Step 1: Install the command (one time)
 
-**API keys (important):**
+#### Windows
 
-- The wizard **does not** ask for API keys unless you enter **MCP → store API keys**.
-- Keys are stored as **GitHub Codespaces user secrets** via `gh secret set --user` (with `--app codespaces` when your `gh` version supports it). They are **not** written to a repo-root `.env` or any tracked file.
-- **Security tiers:** prefer OAuth / no static key when your MCP supports it; otherwise Codespaces user secrets (set once — they **persist** for future codespaces until you rotate or delete them). Keeping production keys only in personal notes is **not** safer than GitHub-managed secrets for most teams.
-- If `gh` reports missing permissions: `gh auth refresh -h github.com -s user -s read:user`
-- Manual alternative: [GitHub → Settings → Codespaces → Secrets](https://github.com/settings/codespaces).
+1. Clone or download this repo somewhere stable, for example `C:\Workspace\ai-lore`.
+2. Open the folder in File Explorer, right-click **`install.ps1`**, and choose **"Run with PowerShell"**.
+   (Prefer a terminal? Run `powershell -ExecutionPolicy Bypass -File install.ps1`.)
+3. Close that window and open a **new** PowerShell or Cursor terminal. The `ai-lore` command now works from anywhere.
 
-**Is the launcher “hidden” on a public repo?** No — committed files are always visible. See [`launcher-setup/VISIBILITY.md`](launcher-setup/VISIBILITY.md).
+Nothing else to install on Windows. No Python, no WSL.
 
-#### Gum vs “Choose [1–4]” in the task terminal
+#### macOS / Linux
 
-If you see the numeric fallback, **`gum` is not on `PATH`** for that shell (often after `gum` was installed under `~/.local/bin`). Tasks prepend `~/.local/bin` to `PATH`. If it still happens, run **`bash launcher-setup/bootstrap.sh`** once in a normal terminal, or **rebuild the container** so `postCreateCommand` runs again. For more install paths, see **Installing gum** below.
+```bash
+git clone <this-repo-url> ai-lore
+cd ai-lore
+bash install.sh
+```
 
-#### Installing gum (pick your environment)
+Then open a new terminal (or run `source ~/.bashrc`, or `source ~/.zshrc`). Needs `bash` and `python3`, which macOS and most Linux already have.
 
-[gum](https://github.com/charmbracelet/gum) powers arrow-key menus in `setup-wizard.sh`. Pick one approach; **Homebrew (`brew`) is most common on macOS**; on Linux many people use the tarball/Go/Nix/distro packages below (Linuxbrew exists but is optional).
+### Step 2: Use it in a project
 
-- **GitHub Codespaces / this devcontainer (Linux)** — Already covered by `postCreateCommand`. To run manually: `bash launcher-setup/bootstrap.sh` (downloads the official **Linux** release tarball into `/usr/local/bin` or `~/.local/bin`). Idempotent: skips if `gum` is already on `PATH`.
-- **macOS** — [Homebrew](https://brew.sh/): `brew install gum`. If you already use Go: `go install github.com/charmbracelet/gum@latest` (ensure `$(go env GOPATH)/bin` is on `PATH`).
-- **Linux (laptop, VM, or Linuxbrew host)** — Prefer the same script as Codespaces when on `x86_64` / `arm64`: `bash launcher-setup/bootstrap.sh`. Alternatives: `go install github.com/charmbracelet/gum@latest`; Nix: `nix profile install nixpkgs#gum` (or your flake’s equivalent); **Arch Linux**: `sudo pacman -S gum` when your mirror ships it. Debian/Ubuntu: use upstream tarball/Go or check your release—package names vary, so verify before `apt install`.
-- **Windows** — Easiest: **WSL2** (Ubuntu, etc.) and follow the **Linux** bullets. Native Windows: use a community package manager if your org supports it—verify the package name/version (e.g. Scoop/Chocolatey/winget may wrap upstream releases); when unsure, use WSL.
+Go to the project you want to add things to, then run setup:
 
-Upstream reference: [charmbracelet/gum releases](https://github.com/charmbracelet/gum/releases).
+```bash
+cd path/to/your-project
+ai-lore setup
+```
 
-#### Local laptop (Terminal.app, Windows Terminal, WSL, etc.)
+You'll get an interactive menu:
 
-VS Code / Codespaces **does not** open tasks in the macOS/Windows **external** terminal app by default. To run the same wizard in **your** terminal:
+1. Pick a category: **Skills**, **MCP servers**, **Rules**, or **Done**.
+2. Choose **Install all** or **Select individually**.
+3. If you're selecting individually, use the arrow keys to move, **Space** to check items on and off, and **Enter** (or **Ctrl+S**) to save. **Esc** cancels.
+4. Repeat for other categories, then choose **Done**.
 
-1. Clone the repo and `cd` into it.
-2. Install **gum** using **Installing gum (pick your environment)** above.
-3. Run: `bash launcher-setup/setup-wizard.sh`
+Everything you pick is copied into the project's `.cursor/` folder. Reload Cursor and the new skills, MCP servers, and rules are available in that project.
 
-That gives the same TUI in iTerm, Terminal.app, Windows Terminal, WSL, etc.—outside VS Code if you want.
+> If a terminal does not support the arrow-key menu, the command automatically falls back to a simple numbered list. Same choices, just type the number.
 
-#### Wizard did not open automatically?
+---
 
-1. **Trust the workspace** when VS Code asks — automatic tasks **never** run in an untrusted workspace.
-2. **Allow automatic tasks:** `Ctrl+Shift+P` (or `Cmd+Shift+P`) → **Tasks: Manage Automatic Tasks in Folder** → **Allow Automatic Tasks in Folder**.  
-   (VS Code often **does not** show a toast for this until you have run a task at least once — see [vscode#143298](https://github.com/microsoft/vscode/issues/143298).)
-3. This repo sets [`task.allowAutomaticTasks`](.vscode/settings.json) to **`on`** in **`.vscode/settings.json`** so the folder-open task can run without that extra prompt when the workspace is trusted.
-4. **Manual run:** **Terminal → Run Task… → “AI Lore: setup wizard”** (or the **(rerun)** variant).
-5. After each attach, `postAttachCommand` prints the same hint in the log output for **Codespaces**.
+## Getting updates
+
+You do **not** reinstall when the library grows. To get newly added skills, MCP servers, or rules:
+
+```bash
+cd path/to/ai-lore
+git pull
+```
+
+Then run `ai-lore setup` again inside any project to add the new items (or to refresh ones you already installed, since installs are copies).
+
+---
+
+## Command reference
+
+| Command | What it does |
+|---------|--------------|
+| `ai-lore setup` | Open the interactive menu and install into the current folder's `.cursor/`. This is the default. |
+| `ai-lore setup --force` | Same, but overwrite existing files without asking. |
+| `ai-lore list` | Show everything available (skills, MCP servers, rules) without installing. |
+| `ai-lore help` | Show usage. |
+
+Run `ai-lore setup` from inside one of your projects, not from inside the ai-lore repo itself (it will refuse, to avoid installing into the library).
+
+## What gets installed where
+
+| In ai-lore (the library) | Lands in your project | Cursor uses it as |
+|--------------------------|-----------------------|-------------------|
+| `skills/<name>/` (any folder with a `SKILL.md`) | `.cursor/skills/<name>/` | A project skill |
+| `mcps/<name>/mcp.template.json` | merged into `.cursor/mcp.json` | A project MCP server |
+| `rules/<name>.mdc` | `.cursor/rules/<name>.mdc` | A project rule |
+
+## API keys
+
+Some MCP servers need an API key; many do not.
+
+- The setup only asks for a key when the server you picked actually needs one. If it doesn't, you'll see "no key needed" and it moves on.
+- Keys are typed with hidden input and saved into the project's `.cursor/mcp.json`.
+- That file is automatically added to the project's `.gitignore`, so keys never get committed.
+- Re-running setup keeps any keys you already entered.
+
+## Installing gum (macOS / Linux, optional)
+
+[gum](https://github.com/charmbracelet/gum) gives the macOS/Linux command the same arrow-key menus that Windows already has built in. It is optional; without it you get the numbered fallback.
+
+| Environment | Install |
+|-------------|---------|
+| macOS | `brew install gum` |
+| Arch Linux | `sudo pacman -S gum` |
+| Nix | `nix profile install nixpkgs#gum` |
+| Any Linux with Go | `go install github.com/charmbracelet/gum@latest` (put `$(go env GOPATH)/bin` on your `PATH`) |
+| Other Linux | Download a release from [charmbracelet/gum releases](https://github.com/charmbracelet/gum/releases) |
+
+Windows does not need gum.
+
+## Troubleshooting
+
+- **"ai-lore is not recognized / command not found."** You opened a terminal before installing, or you skipped step 1. Open a brand new terminal after running the installer. On Windows you can also reload the current window with `. $PROFILE`.
+- **The menu shows numbers instead of arrow keys (macOS/Linux).** That's the fallback. Install `gum` (see above) for the arrow-key version. Everything still works either way.
+
+---
+
+## Repository structure
+
+For engineers browsing or contributing to the library itself:
+
+| Folder | Purpose |
+|--------|---------|
+| `/models` | Provider configurations (Claude, OpenAI, Codex): default system prompts, temperature baselines, model version pinning. |
+| `/plugins` | Code, manifests, and integrations connecting our models to internal dashboards and third-party tools. |
+| `/mcps` | Model Context Protocol setups that bridge LLMs to local dev environments and internal databases. |
+| `/skills` | Library of reusable prompt chains for specific, repeatable tasks. |
+| `/agents` | Autonomous agent definitions, multi-agent orchestration, and state/memory configs. |
+| `/hooks` | Event-driven webhooks that trigger automated AI workflows from internal system events. |
+| `/guards` | PII scrubbing, input/output moderation, and compliance guardrails. |
+| `/evals` | Test suites, prompt benchmarks, and regression tests run before changes ship. |
+| `/telemetry` | OpenTelemetry hooks, logging schemas, and trace formats for auditing agent runs. |
+
+Supporting pieces: `bin/` holds the `ai-lore` launchers (`ai-lore` for bash, `ai-lore.ps1` for PowerShell), `lib/` holds shared helpers, and `install.sh` / `install.ps1` register the command.

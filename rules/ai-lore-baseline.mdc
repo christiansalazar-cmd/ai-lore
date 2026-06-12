@@ -1,0 +1,11 @@
+---
+description: Baseline working agreements shared across ai-lore-enabled projects.
+alwaysApply: false
+---
+
+# ai-lore baseline
+
+- Prefer existing project conventions over introducing new ones.
+- Keep changes scoped to the request; avoid unrelated refactors.
+- Do not commit secrets. API keys belong in gitignored config, never in tracked files.
+- When adding dependencies, use the project's package manager and current versions.
