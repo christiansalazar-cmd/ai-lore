@@ -11,6 +11,9 @@ Checks (any failure exits non-zero with a clear message):
   - skills/: every leaf folder (has files, no subdirs) contains a SKILL.md.
   - rules/*.mdc: each is a readable file.
   - Light secret scan across skills/, rules/, mcps/ for obvious key patterns.
+
+Runs automatically on every pull request via the Validate contributions
+GitHub Actions workflow.
 """
 from __future__ import annotations
 
