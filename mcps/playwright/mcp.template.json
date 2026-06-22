@@ -1,0 +1,11 @@
+﻿{
+    "mcpServers":  {
+                       "playwright":  {
+                                          "command":  "npx",
+                                          "args":  [
+                                                       "@playwright/mcp@latest",
+                                                       "--user-data-dir=c:\\Workspace\\DemoTranScript\\.browser_profile"
+                                                   ]
+                                      }
+                   }
+}
