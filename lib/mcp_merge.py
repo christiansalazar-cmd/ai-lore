@@ -12,6 +12,14 @@ Subcommands:
   set-env <target_mcp_json> <server_name> <var_name>
       Read the secret VALUE from stdin and set it on target.mcpServers[server][env][var].
       Reading from stdin avoids leaking the value via argv/process list.
+
+  list-servers <source_mcp_json>
+      Print one server name per line for every server in source.mcpServers.
+
+  extract-server <source_mcp_json> <server_name> <out_template>
+      Pull one named server block out of source and write it to out_template as a
+      standalone {"mcpServers": {"<name>": {...}}}, blanking every env value so no
+      secret is ever written into the shared template.
 """
 from __future__ import annotations
 
@@ -102,6 +110,27 @@ def cmd_set_env(target: Path, server: str, var: str) -> int:
     return 0
 
 
+def cmd_list_servers(source: Path) -> int:
+    for name in _servers(_load(source)):
+        print(name)
+    return 0
+
+
+def cmd_extract_server(source: Path, server: str, out_template: Path) -> int:
+    servers = _servers(_load(source))
+    cfg = servers.get(server)
+    if not isinstance(cfg, dict):
+        print(f"extract-server: server not found: {server}", file=sys.stderr)
+        return 1
+    cfg = json.loads(json.dumps(cfg))  # deep copy
+    env = cfg.get("env")
+    if isinstance(env, dict):
+        cfg["env"] = {k: "" for k in env}
+    _save(out_template, {"mcpServers": {server: cfg}})
+    print(f"extract-server: wrote {out_template}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv:
         print(__doc__, file=sys.stderr)
@@ -113,6 +142,10 @@ def main(argv: list[str]) -> int:
         return cmd_list_empty_env(Path(rest[0]), Path(rest[1]))
     if cmd == "set-env" and len(rest) == 3:
         return cmd_set_env(Path(rest[0]), rest[1], rest[2])
+    if cmd == "list-servers" and len(rest) == 1:
+        return cmd_list_servers(Path(rest[0]))
+    if cmd == "extract-server" and len(rest) == 3:
+        return cmd_extract_server(Path(rest[0]), rest[1], Path(rest[2]))
     print(__doc__, file=sys.stderr)
     return 2
 

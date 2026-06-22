@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ai-lore â€” install shared AI assets (skills, MCPs, rules) into the current project.
+# ai-lore Ã¢â‚¬â€ install shared AI assets (skills, MCPs, rules) into the current project.
 # Target editor: Cursor (writes into <project>/.cursor/). See README for other editors.
 
 set -euo pipefail
@@ -25,6 +25,9 @@ source "${AI_LORE_HOME}/lib/common.sh"
 
 MCP_MERGE="${AI_LORE_HOME}/lib/mcp_merge.py"
 FORCE=0
+# Where 'ai-lore add' writes copies. Defaults to the library; the add flow points
+# this at a temporary git worktree so the user's checkout is never touched.
+DEST_ROOT="${AI_LORE_HOME}"
 
 # --- Catalog discovery -------------------------------------------------------
 
@@ -225,6 +228,340 @@ prompt_keys_for_template() {
   done < <(python3 "$MCP_MERGE" list-empty-env "$mcp_json" "$tmpl")
 }
 
+# --- Contribute back (ai-lore add) -------------------------------------------
+
+# Print "label<TAB>absdir" for each skill in the project's .cursor/skills/.
+discover_project_skills() {
+  local root="$1/.cursor/skills" skill_md dir name
+  [[ -d "$root" ]] || return 0
+  while IFS= read -r skill_md; do
+    dir="$(dirname "$skill_md")"
+    name="$(basename "$dir")"
+    printf '%s\t%s\n' "$name" "$dir"
+  done < <(find "$root" -type f -name SKILL.md | sort)
+}
+
+# Print "label<TAB>absfile" for each rule in the project's .cursor/rules/.
+discover_project_rules() {
+  local root="$1/.cursor/rules" f name
+  [[ -d "$root" ]] || return 0
+  while IFS= read -r f; do
+    name="$(basename "$f")"
+    printf '%s\t%s\n' "$name" "$f"
+  done < <(find "$root" -type f -name '*.mdc' | sort)
+}
+
+# Print one server name per line from the project's .cursor/mcp.json.
+discover_project_mcps() {
+  local mcp_json="$1/.cursor/mcp.json"
+  [[ -f "$mcp_json" ]] || return 0
+  python3 "$MCP_MERGE" list-servers "$mcp_json" 2>/dev/null | sort
+}
+
+# copy_into_library SRC DEST  -> returns 0 if a change was made, 1 if skipped/identical
+copy_into_library() {
+  local src="$1" dest="$2"
+  if [[ -e "$dest" ]]; then
+    if [[ -d "$src" ]]; then
+      if diff -rq "$src" "$dest" >/dev/null 2>&1; then
+        echo "  already up to date: ${dest#"$DEST_ROOT"/}"
+        return 1
+      fi
+    elif cmp -s "$src" "$dest"; then
+      echo "  already up to date: ${dest#"$DEST_ROOT"/}"
+      return 1
+    fi
+    if [[ "$FORCE" -ne 1 ]]; then
+      if ! ui_confirm "Overwrite existing ${dest#"$DEST_ROOT"/} in the library?"; then
+        echo "  skipped: ${dest#"$DEST_ROOT"/}"
+        return 1
+      fi
+    fi
+  fi
+  rm -rf "$dest"
+  mkdir -p "$(dirname "$dest")"
+  cp -R "$src" "$dest"
+  echo "  added: ${dest#"$DEST_ROOT"/}"
+  return 0
+}
+
+# Default branch on origin (e.g. main); falls back to current HEAD if no remote.
+git_default_branch() {
+  local ref
+  ref="$(git -C "$AI_LORE_HOME" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)"
+  if [[ -n "$ref" ]]; then
+    echo "${ref#refs/remotes/origin/}"
+    return 0
+  fi
+  git -C "$AI_LORE_HOME" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main"
+}
+
+has_origin() {
+  git -C "$AI_LORE_HOME" remote get-url origin >/dev/null 2>&1
+}
+
+gh_ready() {
+  command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1
+}
+
+# owner/repo from origin URL (https or ssh); empty if not parseable.
+repo_slug() {
+  local url
+  url="$(git -C "$AI_LORE_HOME" remote get-url origin 2>/dev/null)" || return 0
+  url="${url%.git}"
+  case "$url" in
+    *github.com[:/]*) echo "${url#*github.com[:/]}" ;;
+    *) echo "" ;;
+  esac
+}
+
+slugify() {
+  local s="$1"
+  s="$(printf '%s' "$s" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-')"
+  s="${s#-}"; s="${s%-}"
+  printf '%s' "${s:-project}"
+}
+
+cmd_add() {
+  local target="$PWD"
+  if is_inside_home "$target"; then
+    echo "Refusing to run inside the ai-lore source repo." >&2
+    echo "cd into one of your projects first, then run: ai-lore add" >&2
+    return 1
+  fi
+  if [[ ! -d "${AI_LORE_HOME}/.git" ]]; then
+    echo "ai-lore library at ${AI_LORE_HOME} is not a git repo; cannot open a PR." >&2
+    echo "Clone it as a git repo first." >&2
+    return 1
+  fi
+  if [[ ! -d "${target}/.cursor" ]]; then
+    echo "No .cursor/ folder here. Nothing to contribute from ${target}." >&2
+    return 1
+  fi
+
+  ui_header "ai-lore add"
+  echo "Project: ${target}"
+  echo "Library: ${AI_LORE_HOME}"
+  echo ""
+
+  # Build the branch + worktree off the latest default branch so the user's
+  # checkout is never touched and the PR has a clean base.
+  local project_name default_branch base worktree branch
+  project_name="$(basename "$target")"
+  git -C "$AI_LORE_HOME" fetch origin --quiet 2>/dev/null || true
+  default_branch="$(git_default_branch)"
+  if has_origin && git -C "$AI_LORE_HOME" rev-parse --verify --quiet "origin/${default_branch}" >/dev/null; then
+    base="origin/${default_branch}"
+  else
+    base="HEAD"
+  fi
+  branch="contrib/$(slugify "$project_name")-$(date -u +%Y%m%d%H%M%S)"
+  worktree="$(mktemp -d)"
+
+  if ! git -C "$AI_LORE_HOME" worktree add -b "$branch" "$worktree" "$base" >/dev/null 2>&1; then
+    echo "Could not create a temporary worktree for the contribution." >&2
+    rm -rf "$worktree"
+    return 1
+  fi
+
+  # Route copies into the worktree, and always clean it up.
+  local prev_dest="$DEST_ROOT"
+  DEST_ROOT="$worktree"
+  # shellcheck disable=SC2064
+  trap "DEST_ROOT='$prev_dest'; git -C '$AI_LORE_HOME' worktree remove --force '$worktree' >/dev/null 2>&1 || true; rm -rf '$worktree' 2>/dev/null || true" RETURN
+
+  local -a added_names=()
+  while true; do
+    local action
+    action="$(choose_one "What do you want to contribute back to ai-lore?" \
+      "Skills" "Rules" "MCP servers" "Done")"
+    case "$action" in
+      Skills) add_skills "$target" added_names || true ;;
+      Rules) add_rules "$target" added_names || true ;;
+      "MCP servers") add_mcps "$target" added_names || true ;;
+      Done | "") break ;;
+    esac
+  done
+
+  if [[ ${#added_names[@]} -eq 0 ]]; then
+    echo ""
+    echo "Nothing new to contribute."
+    return 0
+  fi
+
+  local names commit_msg
+  names="$(printf '%s, ' "${added_names[@]}")"
+  names="${names%, }"
+  commit_msg="add: ${names} from ${project_name}"
+
+  echo ""
+  echo "Staged additions: ${names}"
+  if ! ui_confirm "Open a pull request to contribute these to ai-lore?"; then
+    echo "Cancelled. Nothing was pushed."
+    return 0
+  fi
+
+  git -C "$worktree" add -A
+  git -C "$worktree" commit -m "$commit_msg" >/dev/null
+  echo "Committed on branch ${branch}."
+
+  if ! has_origin; then
+    echo ""
+    echo "No 'origin' remote, so nothing was pushed."
+    echo "The contribution is on local branch '${branch}' in ${AI_LORE_HOME}."
+    return 0
+  fi
+
+  if ! git -C "$worktree" push -u origin "$branch" >/dev/null 2>&1; then
+    echo ""
+    echo "Push failed (check your git credentials)."
+    echo "Retry with: git -C \"${AI_LORE_HOME}\" push -u origin ${branch}"
+    return 0
+  fi
+  echo "Pushed ${branch} to origin."
+
+  local pr_body slug
+  pr_body="Contributed via 'ai-lore add' from project '${project_name}'.
+
+Adds: ${names}
+
+MCP API keys were stripped before commit."
+
+  if gh_ready; then
+    local pr_url
+    pr_url="$(cd "$worktree" && gh pr create --base "$default_branch" --head "$branch" \
+      --title "$commit_msg" --body "$pr_body" 2>/dev/null)" || true
+    if [[ -n "$pr_url" ]]; then
+      echo "Pull request opened: ${pr_url}"
+      # Try to enable auto-merge so the PR merges itself once CI passes. Needs
+      # "Allow auto-merge" enabled on the repo; harmless no-op otherwise.
+      if (cd "$worktree" && gh pr merge "$pr_url" --auto --squash >/dev/null 2>&1); then
+        echo "Auto-merge enabled: it will merge once checks pass."
+      else
+        echo "Auto-merge not enabled (turn on 'Allow auto-merge' in repo settings); merge it manually after checks pass."
+      fi
+      return 0
+    fi
+    echo "Branch pushed, but 'gh pr create' did not return a URL. Open it manually below."
+  fi
+
+  slug="$(repo_slug)"
+  echo ""
+  echo "Open a pull request:"
+  if [[ -n "$slug" ]]; then
+    echo "  https://github.com/${slug}/compare/${default_branch}...${branch}?expand=1"
+  fi
+  echo "  or run: gh pr create --base ${default_branch} --head ${branch} --fill"
+}
+
+# add_skills TARGET NAMES_ARRAY_NAME  -> returns 0 if anything copied
+add_skills() {
+  local target="$1" names_ref="$2"
+  local -a labels=() dirs=()
+  while IFS=$'\t' read -r label dir; do
+    [[ -z "$label" ]] && continue
+    labels+=("$label")
+    dirs+=("$dir")
+  done < <(discover_project_skills "$target")
+
+  if [[ ${#labels[@]} -eq 0 ]]; then
+    echo "No skills in ${target}/.cursor/skills."
+    return 1
+  fi
+
+  local chosen
+  chosen="$(choose_multi "Select skills to contribute" "${labels[@]}")"
+  [[ -z "$chosen" ]] && { echo "No skills selected."; return 1; }
+
+  local sel i any=1
+  while IFS= read -r sel; do
+    [[ -z "$sel" ]] && continue
+    for i in "${!labels[@]}"; do
+      if [[ "${labels[$i]}" == "$sel" ]]; then
+        if copy_into_library "${dirs[$i]}" "${DEST_ROOT}/skills/${labels[$i]}"; then
+          eval "${names_ref}+=(\"${labels[$i]}\")"
+          any=0
+        fi
+        break
+      fi
+    done
+  done <<<"$chosen"
+  return $any
+}
+
+# add_rules TARGET NAMES_ARRAY_NAME  -> returns 0 if anything copied
+add_rules() {
+  local target="$1" names_ref="$2"
+  local -a labels=() files=()
+  while IFS=$'\t' read -r label file; do
+    [[ -z "$label" ]] && continue
+    labels+=("$label")
+    files+=("$file")
+  done < <(discover_project_rules "$target")
+
+  if [[ ${#labels[@]} -eq 0 ]]; then
+    echo "No rules in ${target}/.cursor/rules."
+    return 1
+  fi
+
+  local chosen
+  chosen="$(choose_multi "Select rules to contribute" "${labels[@]}")"
+  [[ -z "$chosen" ]] && { echo "No rules selected."; return 1; }
+
+  local sel i any=1
+  while IFS= read -r sel; do
+    [[ -z "$sel" ]] && continue
+    for i in "${!labels[@]}"; do
+      if [[ "${labels[$i]}" == "$sel" ]]; then
+        if copy_into_library "${files[$i]}" "${DEST_ROOT}/rules/${labels[$i]}"; then
+          eval "${names_ref}+=(\"${labels[$i]}\")"
+          any=0
+        fi
+        break
+      fi
+    done
+  done <<<"$chosen"
+  return $any
+}
+
+# add_mcps TARGET NAMES_ARRAY_NAME  -> returns 0 if anything copied
+add_mcps() {
+  local target="$1" names_ref="$2"
+  local mcp_json="${target}/.cursor/mcp.json"
+  local -a names=()
+  local s
+  while IFS= read -r s; do
+    [[ -z "$s" ]] && continue
+    names+=("$s")
+  done < <(discover_project_mcps "$target")
+
+  if [[ ${#names[@]} -eq 0 ]]; then
+    echo "No MCP servers in ${target}/.cursor/mcp.json."
+    return 1
+  fi
+
+  local chosen
+  chosen="$(choose_multi "Select MCP servers to contribute (keys are stripped)" "${names[@]}")"
+  [[ -z "$chosen" ]] && { echo "No MCP servers selected."; return 1; }
+
+  local sel dest tmp any=1
+  while IFS= read -r sel; do
+    [[ -z "$sel" ]] && continue
+    dest="${DEST_ROOT}/mcps/${sel}/mcp.template.json"
+    tmp="$(mktemp)"
+    if python3 "$MCP_MERGE" extract-server "$mcp_json" "$sel" "$tmp" >/dev/null; then
+      if copy_into_library "$tmp" "$dest"; then
+        eval "${names_ref}+=(\"${sel}\")"
+        any=0
+      fi
+    else
+      echo "  could not extract server: ${sel}"
+    fi
+    rm -f "$tmp"
+  done <<<"$chosen"
+  return $any
+}
+
 # --- Subcommands -------------------------------------------------------------
 
 cmd_list() {
@@ -268,15 +605,18 @@ cmd_setup() {
 
 usage() {
   cat <<EOF
-ai-lore â€” install shared AI assets into the current project (Cursor).
+ai-lore Ã¢â‚¬â€ install shared AI assets into the current project (Cursor).
 
 Usage:
   ai-lore setup [--force]   Interactive install into \$PWD/.cursor (default)
+  ai-lore add [--force]     Contribute this project's skills/rules/MCPs back to ai-lore
   ai-lore list              Show available skills, MCP servers, and rules
   ai-lore --help            Show this help
 
 Notes:
   - Run 'ai-lore setup' from inside one of your projects (not the ai-lore repo).
+  - 'ai-lore add' copies from this project's .cursor/ into the ai-lore library and
+    auto-commits. MCP keys are stripped before they are written.
   - Files are COPIED, so projects keep working if ai-lore moves or updates.
   - MCP API keys go into .cursor/mcp.json and are gitignored automatically.
 
@@ -288,7 +628,7 @@ main() {
   local cmd="setup"
   if [[ $# -gt 0 ]]; then
     case "$1" in
-      setup | list) cmd="$1"; shift ;;
+      setup | list | add) cmd="$1"; shift ;;
       -h | --help | help) usage; return 0 ;;
       --force) cmd="setup" ;;
       *) echo "Unknown command: $1" >&2; usage; return 2 ;;
@@ -306,6 +646,7 @@ main() {
   case "$cmd" in
     setup) cmd_setup ;;
     list) cmd_list ;;
+    add) cmd_add ;;
   esac
 }
 

@@ -20,6 +20,10 @@ $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $PSCommandPath
 $AiLoreHome = if ($env:AI_LORE_HOME) { $env:AI_LORE_HOME } else { Split-Path -Parent $ScriptDir }
 
+# Where 'ai-lore add' writes copies. Defaults to the library; the add flow points
+# this at a temporary git worktree so the user's checkout is never touched.
+$script:DestRoot = $AiLoreHome
+
 # --- Catalog discovery -------------------------------------------------------
 function Get-Skills {
   $root = Join-Path $AiLoreHome "skills"
@@ -431,6 +435,307 @@ function Install-Mcps {
   Write-Host "  note: added .cursor/mcp.json to .gitignore (contains keys)"
 }
 
+# --- Contribute back (ai-lore add) -------------------------------------------
+function Get-ProjectSkills {
+  param([string]$Target)
+  $root = Join-Path $Target ".cursor\skills"
+  if (-not (Test-Path $root)) { return @() }
+  Get-ChildItem -Path $root -Recurse -Filter "SKILL.md" -File | ForEach-Object {
+    $dir = $_.Directory.FullName
+    [pscustomobject]@{ Label = (Split-Path -Leaf $dir); Path = $dir }
+  } | Sort-Object Label
+}
+
+function Get-ProjectRules {
+  param([string]$Target)
+  $root = Join-Path $Target ".cursor\rules"
+  if (-not (Test-Path $root)) { return @() }
+  Get-ChildItem -Path $root -Recurse -Filter "*.mdc" -File | ForEach-Object {
+    [pscustomobject]@{ Label = $_.Name; Path = $_.FullName }
+  } | Sort-Object Label
+}
+
+function Get-ProjectMcps {
+  param([string]$Target)
+  $mcpJson = Join-Path $Target ".cursor\mcp.json"
+  if (-not (Test-Path $mcpJson)) { return @() }
+  $data = Read-McpJson $mcpJson
+  if (-not $data.Contains("mcpServers")) { return @() }
+  @($data["mcpServers"].Keys) | Sort-Object | ForEach-Object {
+    [pscustomobject]@{ Label = $_ }
+  }
+}
+
+# Write one server block as a standalone template with all env values blanked.
+function Export-ServerTemplate {
+  param([string]$SourceMcpJson, [string]$Server, [string]$OutTemplate)
+  $data = Read-McpJson $SourceMcpJson
+  if (-not $data.Contains("mcpServers") -or -not $data["mcpServers"].Contains($Server)) {
+    return $false
+  }
+  $cfg = $data["mcpServers"][$Server]
+  if ($cfg["env"] -is [System.Collections.IDictionary]) {
+    foreach ($k in @($cfg["env"].Keys)) { $cfg["env"][$k] = "" }
+  }
+  $out = [ordered]@{ mcpServers = [ordered]@{ $Server = $cfg } }
+  Save-McpJson $OutTemplate $out
+  return $true
+}
+
+# Returns $true if it actually wrote a change, $false if skipped/identical.
+function Copy-IntoLibrary {
+  param([string]$Src, [string]$Dest)
+  $rel = $Dest
+  if ($Dest.StartsWith($script:DestRoot)) { $rel = $Dest.Substring($script:DestRoot.Length).TrimStart('\', '/') }
+  if (Test-Path $Dest) {
+    if (Test-Identical -Src $Src -Dest $Dest) {
+      Write-Host "  already up to date: $rel" -ForegroundColor DarkGray
+      return $false
+    }
+    if (-not $Force) {
+      if (-not (Confirm-Action "Overwrite existing $rel in the library?")) {
+        Write-Host "  skipped: $rel"
+        return $false
+      }
+    }
+    Remove-Item -Recurse -Force $Dest
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Dest) | Out-Null
+  Copy-Item -Recurse -Force -Path $Src -Destination $Dest
+  Write-Host "  added: $rel" -ForegroundColor Green
+  return $true
+}
+
+function Test-Identical {
+  param([string]$Src, [string]$Dest)
+  if ((Test-Path $Src -PathType Container) -ne (Test-Path $Dest -PathType Container)) { return $false }
+  if (Test-Path $Src -PathType Container) {
+    $a = Get-ChildItem -Recurse -File $Src | Sort-Object FullName
+    $b = Get-ChildItem -Recurse -File $Dest | Sort-Object FullName
+    if ($a.Count -ne $b.Count) { return $false }
+    for ($i = 0; $i -lt $a.Count; $i++) {
+      $ra = $a[$i].FullName.Substring($Src.Length)
+      $rb = $b[$i].FullName.Substring($Dest.Length)
+      if ($ra -ne $rb) { return $false }
+      if ((Get-FileHash $a[$i].FullName).Hash -ne (Get-FileHash $b[$i].FullName).Hash) { return $false }
+    }
+    return $true
+  }
+  return ((Get-FileHash $Src).Hash -eq (Get-FileHash $Dest).Hash)
+}
+
+function Add-ProjectSkills {
+  param([string]$Target, [System.Collections.ArrayList]$Names)
+  $items = @(Get-ProjectSkills -Target $Target)
+  if ($items.Count -eq 0) { Write-Host "No skills in $Target\.cursor\skills."; return }
+  $sel = @(Select-Items -Title "Select skills to contribute" -Items $items -Multi)
+  if ($sel.Count -eq 0) { Write-Host "No skills selected."; return }
+  foreach ($s in $sel) {
+    if (Copy-IntoLibrary -Src $s.Path -Dest (Join-Path $script:DestRoot "skills\$($s.Label)")) {
+      [void]$Names.Add($s.Label)
+    }
+  }
+}
+
+function Add-ProjectRules {
+  param([string]$Target, [System.Collections.ArrayList]$Names)
+  $items = @(Get-ProjectRules -Target $Target)
+  if ($items.Count -eq 0) { Write-Host "No rules in $Target\.cursor\rules."; return }
+  $sel = @(Select-Items -Title "Select rules to contribute" -Items $items -Multi)
+  if ($sel.Count -eq 0) { Write-Host "No rules selected."; return }
+  foreach ($r in $sel) {
+    if (Copy-IntoLibrary -Src $r.Path -Dest (Join-Path $script:DestRoot "rules\$($r.Label)")) {
+      [void]$Names.Add($r.Label)
+    }
+  }
+}
+
+function Add-ProjectMcps {
+  param([string]$Target, [System.Collections.ArrayList]$Names)
+  $items = @(Get-ProjectMcps -Target $Target)
+  if ($items.Count -eq 0) { Write-Host "No MCP servers in $Target\.cursor\mcp.json."; return }
+  $sel = @(Select-Items -Title "Select MCP servers to contribute (keys are stripped)" -Items $items -Multi)
+  if ($sel.Count -eq 0) { Write-Host "No MCP servers selected."; return }
+  $mcpJson = Join-Path $Target ".cursor\mcp.json"
+  foreach ($m in $sel) {
+    $tmp = [IO.Path]::GetTempFileName()
+    try {
+      if (Export-ServerTemplate -SourceMcpJson $mcpJson -Server $m.Label -OutTemplate $tmp) {
+        $dest = Join-Path $script:DestRoot "mcps\$($m.Label)\mcp.template.json"
+        if (Copy-IntoLibrary -Src $tmp -Dest $dest) { [void]$Names.Add($m.Label) }
+      }
+      else { Write-Host "  could not extract server: $($m.Label)" }
+    }
+    finally { Remove-Item -Force $tmp -ErrorAction SilentlyContinue }
+  }
+}
+
+function Get-GitDefaultBranch {
+  $ref = (git -C $AiLoreHome symbolic-ref --quiet refs/remotes/origin/HEAD 2>$null)
+  if ($ref) { return ($ref -replace '^refs/remotes/origin/', '') }
+  $cur = (git -C $AiLoreHome rev-parse --abbrev-ref HEAD 2>$null)
+  if ($cur) { return $cur }
+  return "main"
+}
+
+function Test-HasOrigin {
+  git -C $AiLoreHome remote get-url origin *> $null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Test-GhReady {
+  if (-not (Get-Command gh -ErrorAction SilentlyContinue)) { return $false }
+  gh auth status *> $null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Get-RepoSlug {
+  $url = (git -C $AiLoreHome remote get-url origin 2>$null)
+  if (-not $url) { return "" }
+  $url = $url -replace '\.git$', ''
+  if ($url -match 'github\.com[:/](.+)$') { return $Matches[1] }
+  return ""
+}
+
+function ConvertTo-Slug {
+  param([string]$Text)
+  $s = ($Text.ToLower() -replace '[^a-z0-9]+', '-').Trim('-')
+  if ([string]::IsNullOrEmpty($s)) { return "project" }
+  return $s
+}
+
+function Invoke-Add {
+  # git/gh write progress to stderr; with ErrorActionPreference=Stop that would
+  # crash the run. We check $LASTEXITCODE explicitly instead, so relax it here
+  # (dynamically scoped, so the git helper functions below inherit it too).
+  $ErrorActionPreference = 'Continue'
+  $target = (Get-Location).Path
+  $homeResolved = (Resolve-Path $AiLoreHome).Path
+  if ($target -eq $homeResolved -or $target.StartsWith($homeResolved + [IO.Path]::DirectorySeparatorChar)) {
+    Write-Host "Refusing to run inside the ai-lore source repo." -ForegroundColor Red
+    Write-Host "cd into one of your projects first, then run: ai-lore add"
+    return
+  }
+  if (-not (Test-Path (Join-Path $AiLoreHome ".git"))) {
+    Write-Host "ai-lore library at $AiLoreHome is not a git repo; cannot open a PR." -ForegroundColor Red
+    return
+  }
+  if (-not (Test-Path (Join-Path $target ".cursor"))) {
+    Write-Host "No .cursor/ folder here. Nothing to contribute from $target." -ForegroundColor Red
+    return
+  }
+
+  Write-Host "`n== ai-lore add ==" -ForegroundColor Cyan
+  Write-Host "Project: $target"
+  Write-Host "Library: $AiLoreHome"
+
+  $projectName = Split-Path -Leaf $target
+  git -C $AiLoreHome fetch origin --quiet 2>$null
+  $defaultBranch = Get-GitDefaultBranch
+  $hasOrigin = Test-HasOrigin
+  $base = "HEAD"
+  if ($hasOrigin) {
+    git -C $AiLoreHome rev-parse --verify --quiet "origin/$defaultBranch" *> $null
+    if ($LASTEXITCODE -eq 0) { $base = "origin/$defaultBranch" }
+  }
+  $branch = "contrib/$(ConvertTo-Slug $projectName)-$([DateTime]::UtcNow.ToString('yyyyMMddHHmmss'))"
+  $worktree = Join-Path ([IO.Path]::GetTempPath()) ("ailore_wt_" + [guid]::NewGuid().ToString("N"))
+
+  git -C $AiLoreHome worktree add -b $branch $worktree $base *> $null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Could not create a temporary worktree for the contribution." -ForegroundColor Red
+    return
+  }
+
+  $names = New-Object System.Collections.ArrayList
+  $prevDest = $script:DestRoot
+  $script:DestRoot = $worktree
+  try {
+    while ($true) {
+      $action = @(Select-Items -Title "What do you want to contribute back to ai-lore?" -Items @(
+          [pscustomobject]@{ Label = "Skills" },
+          [pscustomobject]@{ Label = "Rules" },
+          [pscustomobject]@{ Label = "MCP servers" },
+          [pscustomobject]@{ Label = "Done" }
+        ))
+      $choice = if ($action.Count -gt 0) { $action[0].Label } else { "Done" }
+      switch ($choice) {
+        "Skills" { Add-ProjectSkills -Target $target -Names $names }
+        "Rules" { Add-ProjectRules -Target $target -Names $names }
+        "MCP servers" { Add-ProjectMcps -Target $target -Names $names }
+        default { break }
+      }
+      if ($choice -eq "Done") { break }
+    }
+
+    if ($names.Count -eq 0) {
+      Write-Host "`nNothing new to contribute."
+      return
+    }
+
+    $joined = ($names -join ", ")
+    $msg = "add: $joined from $projectName"
+    Write-Host "`nStaged additions: $joined"
+    if (-not (Confirm-Action "Open a pull request to contribute these to ai-lore?")) {
+      Write-Host "Cancelled. Nothing was pushed."
+      return
+    }
+
+    git -C $worktree add -A
+    git -C $worktree commit -m $msg | Out-Null
+    Write-Host "Committed on branch $branch." -ForegroundColor Green
+
+    if (-not $hasOrigin) {
+      Write-Host "`nNo 'origin' remote, so nothing was pushed."
+      Write-Host "The contribution is on local branch '$branch' in $AiLoreHome."
+      return
+    }
+
+    git -C $worktree push -u origin $branch *> $null
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "`nPush failed (check your git credentials)." -ForegroundColor Yellow
+      Write-Host "Retry with: git -C `"$AiLoreHome`" push -u origin $branch"
+      return
+    }
+    Write-Host "Pushed $branch to origin."
+
+    $prBody = "Contributed via 'ai-lore add' from project '$projectName'.`n`nAdds: $joined`n`nMCP API keys were stripped before commit."
+    if (Test-GhReady) {
+      Push-Location $worktree
+      try {
+        $prUrl = (gh pr create --base $defaultBranch --head $branch --title $msg --body $prBody 2>$null)
+        if ($prUrl) {
+          Write-Host "Pull request opened: $prUrl" -ForegroundColor Green
+          # Try to enable auto-merge so the PR merges itself once CI passes. Needs
+          # "Allow auto-merge" enabled on the repo; harmless no-op otherwise.
+          gh pr merge $prUrl --auto --squash *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Auto-merge enabled: it will merge once checks pass."
+          }
+          else {
+            Write-Host "Auto-merge not enabled (turn on 'Allow auto-merge' in repo settings); merge it manually after checks pass." -ForegroundColor Yellow
+          }
+        }
+      }
+      finally { Pop-Location }
+      if ($prUrl) { return }
+      Write-Host "Branch pushed, but 'gh pr create' did not return a URL. Open it manually below." -ForegroundColor Yellow
+    }
+
+    $slug = Get-RepoSlug
+    Write-Host "`nOpen a pull request:"
+    if ($slug) {
+      Write-Host "  https://github.com/$slug/compare/$defaultBranch...$branch`?expand=1"
+    }
+    Write-Host "  or run: gh pr create --base $defaultBranch --head $branch --fill"
+  }
+  finally {
+    $script:DestRoot = $prevDest
+    git -C $AiLoreHome worktree remove --force $worktree *> $null
+    if (Test-Path $worktree) { Remove-Item -Recurse -Force $worktree -ErrorAction SilentlyContinue }
+  }
+}
+
 # --- Subcommands -------------------------------------------------------------
 function Invoke-List {
   Write-Host "`n== Skills ==" -ForegroundColor Cyan
@@ -481,11 +786,14 @@ ai-lore - install shared AI assets into the current project (Cursor).
 
 Usage:
   ai-lore setup [-Force]   Interactive install into the current folder's .cursor (default)
+  ai-lore add [-Force]     Contribute this project's skills/rules/MCPs back to ai-lore
   ai-lore list             Show available skills, MCP servers, and rules
   ai-lore help             Show this help
 
 Notes:
   - Run 'ai-lore setup' from inside one of your projects (not the ai-lore repo).
+  - 'ai-lore add' copies from this project's .cursor\ into the ai-lore library and
+    auto-commits. MCP keys are stripped before they are written.
   - Files are COPIED, so your projects keep working if ai-lore moves or updates.
   - MCP API keys go into .cursor\mcp.json and are gitignored automatically.
 
@@ -495,6 +803,7 @@ AI_LORE_HOME = $AiLoreHome
 
 switch ($Command.ToLower()) {
   "setup" { Invoke-Setup }
+  "add" { Invoke-Add }
   "list" { Invoke-List }
   "help" { Show-Usage }
   "-h" { Show-Usage }

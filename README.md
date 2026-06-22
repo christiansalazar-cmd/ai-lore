@@ -77,12 +77,56 @@ Then run `ai-lore setup` again inside any project to add the new items (or to re
 
 ---
 
+## Contributing back to the library
+
+Built a useful skill, rule, or MCP setup inside a project? Send it back so everyone can use it. From inside that project, run:
+
+```bash
+cd path/to/your-project
+ai-lore add
+```
+
+You get the same kind of menu as setup:
+
+1. Pick a category: **Skills**, **Rules**, **MCP servers**, or **Done**.
+2. Check off the items you want to contribute.
+3. `ai-lore add` copies your picks onto a fresh branch, pushes it, and opens a **pull request** for review. It never commits straight to `main`.
+
+What happens to each type:
+
+| You pick | Read from your project | Proposed in the library |
+|----------|------------------------|-------------------------|
+| A skill | `.cursor/skills/<name>/` | `skills/<name>/` |
+| A rule | `.cursor/rules/<name>.mdc` | `rules/<name>.mdc` |
+| An MCP server | a server in `.cursor/mcp.json` | `mcps/<name>/mcp.template.json` |
+
+How the pull request gets opened:
+
+- Your picks are copied into a temporary git worktree off the latest `main`, so **your project's checkout and branch are never touched**.
+- They're committed to a new branch named `contrib/<project>-<timestamp>` and pushed to `origin`.
+- If the [GitHub CLI](https://cli.github.com/) (`gh`) is installed and signed in, the PR is opened automatically and the URL is printed.
+- If not, the command prints a compare link and the exact `gh pr create` command so you can open it in one step.
+
+Notes:
+
+- **API keys are never contributed.** When you add an MCP server, its key values are blanked out before the template is saved, so secrets never get committed.
+- If something you pick is already in the library and identical, it's skipped ("already up to date"). If it differs, you're asked before overwriting.
+- Nothing lands in `main` until a maintainer reviews and merges the PR. Every PR is checked automatically by the **Validate contributions** workflow (valid JSON, no stray API keys, skill structure).
+- No `origin` remote or no push credentials? The contribution stays on a local branch and the command tells you how to push and open the PR yourself.
+
+### Maintainers: make review mandatory
+
+The PR flow is only a real safeguard if `main` is protected. In the repo's **Settings -> Branches**, add a branch protection rule for `main` that requires a pull request, at least one approval, and the **Validate contributions** status check before merging. (This is a GitHub admin setting and can't be toggled from the CLI.)
+
+---
+
 ## Command reference
 
 | Command | What it does |
 |---------|--------------|
 | `ai-lore setup` | Open the interactive menu and install into the current folder's `.cursor/`. This is the default. |
 | `ai-lore setup --force` | Same, but overwrite existing files without asking. |
+| `ai-lore add` | Contribute this project's skills, rules, or MCP servers back to ai-lore by opening a pull request. |
 | `ai-lore list` | Show everything available (skills, MCP servers, rules) without installing. |
 | `ai-lore help` | Show usage. |
 
@@ -142,4 +186,4 @@ For engineers browsing or contributing to the library itself:
 | `/evals` | Test suites, prompt benchmarks, and regression tests run before changes ship. |
 | `/telemetry` | OpenTelemetry hooks, logging schemas, and trace formats for auditing agent runs. |
 
-Supporting pieces: `bin/` holds the `ai-lore` launchers (`ai-lore` for bash, `ai-lore.ps1` for PowerShell), `lib/` holds shared helpers, and `install.sh` / `install.ps1` register the command.
+Supporting pieces: `bin/` holds the `ai-lore` launchers (`ai-lore` for bash, `ai-lore.ps1` for PowerShell), `lib/` holds shared helpers (including `validate_catalog.py`, the contribution validator), `.github/workflows/` runs that validator on every pull request, and `install.sh` / `install.ps1` register the command.
