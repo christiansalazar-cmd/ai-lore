@@ -7,9 +7,13 @@ on:
       - "rules/**"
       - "mcps/**"
       - "lib/validate_catalog.py"
+      - ".github/workflows/validate-contributions.yml"
 
 jobs:
   validate:
+    # Job name = the status-check context that branch protection requires.
+    # Must stay exactly "Validate contributions" to match the required check.
+    name: Validate contributions
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
