@@ -46,7 +46,9 @@ def check_mcps(root: Path, errors: list[str]) -> None:
     for tmpl in sorted(mcps.rglob("mcp.template.json")):
         rel = tmpl.relative_to(root)
         try:
-            data = json.loads(tmpl.read_text(encoding="utf-8"))
+            # utf-8-sig tolerates a stray BOM (Windows editors / PS 5.1) on
+            # otherwise-valid JSON instead of failing CI on a harmless prefix.
+            data = json.loads(tmpl.read_text(encoding="utf-8-sig"))
         except (json.JSONDecodeError, OSError) as exc:
             _err(errors, f"{rel}: invalid JSON ({exc})")
             continue

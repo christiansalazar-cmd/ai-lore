@@ -280,7 +280,10 @@ function Save-McpJson {
   param([string]$Path, $Data)
   $dir = Split-Path -Parent $Path
   if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
-  ($Data | ConvertTo-Json -Depth 30) | Set-Content -Path $Path -Encoding UTF8
+  # Write UTF-8 WITHOUT a BOM. Windows PowerShell 5.1's "Set-Content -Encoding UTF8"
+  # prepends a BOM, which breaks json.loads (CI) and the Python merge helper.
+  $json = ($Data | ConvertTo-Json -Depth 30)
+  [System.IO.File]::WriteAllText($Path, $json + "`n", (New-Object System.Text.UTF8Encoding($false)))
 }
 
 function Merge-McpTemplate {
