@@ -32,7 +32,9 @@ def _load(path: Path) -> dict:
     if not path.exists():
         return {}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        # utf-8-sig tolerates a BOM-prefixed file (common from Windows editors /
+        # PS 5.1) instead of silently returning {} and dropping the user's servers.
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}

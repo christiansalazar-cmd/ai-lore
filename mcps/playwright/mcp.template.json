@@ -1,4 +1,4 @@
-﻿{
+{
     "mcpServers":  {
                        "playwright":  {
                                           "command":  "npx",
