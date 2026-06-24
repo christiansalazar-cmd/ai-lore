@@ -726,11 +726,16 @@ function Invoke-Add {
     }
 
     $slug = Get-RepoSlug
-    Write-Host "`nOpen a pull request:"
+    Write-Host "`nAlmost done! Finish your contribution in 3 steps:" -ForegroundColor Cyan
     if ($slug) {
-      Write-Host "  https://github.com/$slug/compare/$defaultBranch...$branch`?expand=1"
+      Write-Host "  1. Open this link:"
+      Write-Host "     https://github.com/$slug/compare/$defaultBranch...$branch`?expand=1"
     }
-    Write-Host "  or run: gh pr create --base $defaultBranch --head $branch --fill"
+    else {
+      Write-Host "  1. Open your repo on GitHub and start a pull request from branch '$branch'."
+    }
+    Write-Host "  2. Click `"Create pull request`"."
+    Write-Host "  3. Wait for the `"Validate contributions`" check to pass - it merges automatically when green."
   }
   finally {
     $script:DestRoot = $prevDest

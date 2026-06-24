@@ -447,11 +447,15 @@ MCP API keys were stripped before commit."
 
   slug="$(repo_slug)"
   echo ""
-  echo "Open a pull request:"
+  echo "Almost done! Finish your contribution in 3 steps:"
   if [[ -n "$slug" ]]; then
-    echo "  https://github.com/${slug}/compare/${default_branch}...${branch}?expand=1"
+    echo "  1. Open this link:"
+    echo "     https://github.com/${slug}/compare/${default_branch}...${branch}?expand=1"
+  else
+    echo "  1. Open your repo on GitHub and start a pull request from branch '${branch}'."
   fi
-  echo "  or run: gh pr create --base ${default_branch} --head ${branch} --fill"
+  echo "  2. Click \"Create pull request\"."
+  echo "  3. Wait for the \"Validate contributions\" check to pass - it merges automatically when green."
 }
 
 # add_skills TARGET NAMES_ARRAY_NAME  -> returns 0 if anything copied
